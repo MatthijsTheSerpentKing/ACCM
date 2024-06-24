@@ -13,7 +13,7 @@ pi = np.pi
 current_directory = os.getcwd()
 
 # Specify the filename of the GSD file
-gsd_filename = 'important-F=100-Te=1e6-Ts=1e7-Tw=1e3-kbo=50000-kbe=90.0-rad=20.0.gsd'
+gsd_filename = 'important-F=100-Te=1e5-Ts=1e7-Tw=1e3-kbo=50000-kbe=30.0-rad=50.0.gsd'
 
 # # Combine the directory and filename to get the full path
 gsd_filepath = os.path.join(current_directory, gsd_filename)
@@ -112,12 +112,14 @@ def angle(x,y): #Polar angle between 0 and 2 pi of a point in the x y plane
     if x>0:
         if y>0:
             theta = np.arctan(y/x)
-        if y<0:
+        else:
             theta = 2*pi - np.arctan(abs(y/x))
-    if x<0:
+    else:
+        if x == 0:
+            x = -0.0000001 #Recent 'fix', needs to be tested
         if y>0:
             theta = pi -np.arctan(abs(y/x))
-        if y<0:
+        else:
             theta = pi +np.arctan(abs(y/x))
     return theta
 
@@ -171,3 +173,15 @@ def mean_square_rot(positions):
     MSR =angles[-1]**2
     return MSR
     
+
+def Gyration_radius(polymer): #New function, needs to be tested
+    x_s = [p[0] for p in polymer]
+    y_s = [p[1] for p in polymer]
+    x_c = np.mean(x_s) #Center of mass in x direction
+    y_c = np.mean(y_s) #Center of mass in y direction
+    
+    Gyration_r = sum([((x_c-p[0])**2+(y_c-p[1])**2)**0.5 for p in polymer])/len(polymer)
+    
+    return Gyration_r
+
+Gyration_radii = [Gyration_radius(p) for p in particle_positions]
