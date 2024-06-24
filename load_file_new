@@ -1,0 +1,278 @@
+import gsd
+import gsd.hoomd
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import copy
+
+pi = np.pi
+
+#File for analyzing GSD data
+
+# Get the current directory
+
+# Specify the filename of the GSD file
+gsd_filename = 'data(part)-F=10.0-Te=1e6-Ts=1e7-Tw=1e3-kbo=50000.0-kbe=50.0-rad=20.0.gsd'
+
+# # Combine the directory and filename to get the full path
+gsd_filepath = os.path.join("/home/vic/Desktop",gsd_filename)
+
+
+
+#### Open gsd without distinguising monomers (but polymers yes)
+#particle_positions = []
+#with gsd.hoomd.open(gsd_filepath) as traj:
+#    polymer_N = len(traj[0].particles.types)
+#    monomers_N = int(len(traj[0].particles.position)/polymer_N)
+#    polymers_pos = [[] for j in range(polymer_N)]
+#    i = 0
+#    for frame in traj:
+#        for p in range(polymer_N):
+#            for j in range(monomers_N):
+#               polymers_pos[p].append(frame.particles.position[p*monomers_N+j])
+#        i+=1
+#        print(i/len(traj),'%')
+
+# # Open the GSD file
+particle_positions = []
+with gsd.hoomd.open(gsd_filepath) as traj:
+    polymer_N = len(traj[0].particles.types)
+    monomers_N = int(len(traj[0].particles.position)/polymer_N)
+    polymers_pos = [[[] for i in range(monomers_N)] for j in range(polymer_N)]
+    i = 0
+    for frame in traj:
+        for p in range(polymer_N):
+            for j in range(monomers_N):
+               polymers_pos[p][j].append(frame.particles.position[p*monomers_N+j])
+        i+=1
+        print(i/len(traj),'%')
+particle_positions = polymers_pos
+print(np.shape(particle_positions))
+#### list of polymers containg list of monomers with position vector of all timesteps
+
+
+#Function to find the distance between the head and the tail of the Polymer
+def head_to_tail_length(polymer):
+    L = ((polymer[0][0]-polymer[-1][0])**2+(polymer[0][1]-polymer[-1][1])**2)**0.5
+    return L
+    
+#Lengths = [head_to_tail_length(p) for p in particle_positions]
+#print('Mean head to tail length =',np.mean(Lengths))
+
+
+#Check displacement of particles in between t_write
+def displacements(positions):  #List of all the displacements for all the particles for all the time steps 
+    displacements = []
+    for p in range(len(positions)-1):
+        for n in range(len(positions[0])):
+            displacement = ((positions[p][n][0]-positions[p+1][n][0])**2+(positions[p][n][1]-positions[p+1][n][1])**2)**0.5
+            displacements.append(displacement)
+            if displacement>100:
+                return displacements
+            
+    return displacements
+            
+#ds = displacements(particle_positions)
+
+#To check if particles really are staying in the convinement
+def x_and_y_positions(positions):
+    x_pos = []
+    y_pos = []
+    for a in positions:
+        for b in a:
+            x_pos.append(b[0])
+            y_pos.append(b[1])
+    return x_pos, y_pos
+
+#x_positions, y_positions = x_and_y_positions(particle_positions) #Particles stay in bound
+
+#Checking the bond lengths
+def bond_lengths(positions):
+    bond_L = []
+    for a in positions:
+        for b in range(len(a)-1):
+            bond_L.append(((a[b][0]-a[b+1][0])**2+(a[b][1]-a[b+1][1])**2)**0.5)
+    
+    return bond_L
+
+#bond_ls = bond_lengths(particle_positions)
+
+def COM(polymer): #Center of mass of the polymer
+    x_s = [p[0] for p in polymer]
+    y_s = [p[1] for p in polymer]
+    x_c = np.mean(x_s)
+    y_c = np.mean(y_s)
+    
+    return x_c, y_c
+
+x_coms = [] #x com positions
+y_coms = [] #y com positions
+for i in range(len(particle_positions)):
+    x_com, y_com = COM(particle_positions[i])
+    x_coms.append(x_com)
+    y_coms.append(y_com)
+
+#Below is sort of the speed of the COM
+def d_COM(positions): #Absolute value of the displacement of the COM in consecutive time steps (t_write)
+    x_coms = [] #x com positions
+    y_coms = [] #y com positions
+    for i in range(len(particle_positions)):
+        x_com, y_com = COM(particle_positions[i])
+        x_coms.append(x_com)
+        y_coms.append(y_com)
+    
+    d_s = [((x_coms[i+1]-x_coms[i])**2+(y_coms[i+1]-y_coms[i])**2)**0.5 for i in range(len(x_coms)-1)]
+    
+    return d_s
+
+#Speed_COM = d_COM(particle_positions)
+#print('Mean speed COM =',np.mean(Speed_COM))
+
+
+#Calculating the Spiral number
+#Defining a function that gives an angle between 0 and 2pi
+def angle(x,y): #Polar angle between 0 and 2 pi of a point in the x y plane
+    pi = np.pi
+    if x>0:
+        if y>0:
+            theta = np.arctan(y/x)
+        else:
+            theta = 2*pi - np.arctan(abs(y/x))
+    else:
+        if x == 0:
+            x = -0.0000001 #Recent 'fix', needs to be tested
+        if y>0:
+            theta = pi -np.arctan(abs(y/x))
+        else:
+            theta = pi +np.arctan(abs(y/x))
+    return theta
+
+#Needs to be updated to allow for negative angles
+def spiral_number(polymer):
+    pi = np.pi
+    x_s = [p[0] for p in polymer]
+    y_s = [p[1] for p in polymer]
+    
+    vectors = [[x_s[i+1]-x_s[i],y_s[i+1]-y_s[i]] for i in range(len(x_s)-1)]
+    rot_vectors = [[-v[1],v[0]] for v in vectors]
+    angles = [angle(r_v[0],r_v[1]) for r_v in rot_vectors]
+    for i in range(1,len(angles)):
+        while True:
+            if abs(angles[i]-angles[i-1])>pi:
+                if angles[i]-angles[i-1]>pi:
+                    angles[i] = angles[i]-2*pi
+                if angles[i]-angles[i-1]<-pi:
+                    angles[i] = angles[i]+2*pi
+            else:
+                break
+    s = (angles[-1]-angles[0])/(2*pi)
+    return s
+
+#spiral_numbers = [spiral_number(p) for p in particle_positions]
+#print('Mean spiral number =',np.mean(spiral_numbers))
+
+#Relevant parameter for distinguishing spiral regimes (see paper)
+def kurtosis(positions): 
+    s_values = [spiral_number(p) for p in positions]
+    mean_s = np.mean(s_values)
+    std_s = np.std(s_values)
+    k = np.mean([((s-mean_s)/std_s)**4 for s in s_values])
+    return k
+
+#Square of the roations (cumulative angle) done by the factor stratching from the first to the last monomer in the polymer
+def mean_square_rot(positions): 
+    vectors = [[p[-1][0]-p[0][0],p[-1][1]-p[0][1]] for p in positions]
+    angles = [angle(v[0],v[1]) for v in vectors]
+    for i in range(1,len(angles)):
+        while True:
+            if abs(angles[i]-angles[i-1])>pi:
+                if angles[i]-angles[i-1]>pi:
+                    angles[i] = angles[i]-2*pi
+                if angles[i]-angles[i-1]<-pi:
+                    angles[i] = angles[i]+2*pi
+            else:
+                break
+    angles = [a - angles[0] for a in angles]
+    
+    MSR =angles[-1]**2
+    return MSR
+    
+
+def Gyration_radius(polymer): #New function, needs to be tested
+    x_s = [p[0] for p in polymer]
+    y_s = [p[1] for p in polymer]
+    x_c = np.mean(x_s) #Center of mass in x direction
+    y_c = np.mean(y_s) #Center of mass in y direction
+    
+    Gyration_r = sum([((x_c-p[0])**2+(y_c-p[1])**2)**0.5 for p in polymer])/len(polymer)
+    
+    return Gyration_r
+
+#Gyration_radii = [Gyration_radius(p) for p in particle_positions]
+
+### vic vander linden (static <t_i, t_i+1> correlation)
+
+def static_tangent_cor(positions,timeindex=0,length=20):
+ ### assumed its one momomer (do positions[polymer index] as input), looks at nearest 20, if timeindex is zero takes average over time
+    corr = [[] for i in range(0,length)]
+    if timeindex == 0:
+        for index in range(1,len(positions[0])):
+            for i in range(1,len(positions)-length):
+                tangent_vec_i = positions[i][index] - positions[i-1][index]
+                if np.sum(tangent_vec_i) != 0:
+                    tangent_vec_i = tangent_vec_i/np.sum(abs(tangent_vec_i))
+                for j in range(1,length):
+                    tangent_vec_j = positions[j+i][index] - positions[i+j-1][index]  
+                    if np.sum(tangent_vec_j) != 0:
+                        tangent_vec_j = tangent_vec_j/np.sum(abs(tangent_vec_j))
+                    corr[j].append(np.dot(tangent_vec_i,tangent_vec_j))
+    else:
+        for i in range(1,len(positions)-length):
+            tangent_vec_i = positions[i][timeindex] - positions[i-1][timeindex]
+            if np.sum(tangent_vec_i) != 0:
+                tangent_vec_i = tangent_vec_i/np.sum(abs(tangent_vec_i))
+            for j in range(1,length):
+                tangent_vec_j = positions[j+i][timeindex] - positions[i+j-1][timeindex]  
+                if np.sum(tangent_vec_j) != 0:
+                    tangent_vec_j = tangent_vec_j/np.sum(abs(tangent_vec_j))
+                corr[j].append(np.dot(tangent_vec_i,tangent_vec_j))
+    result = []
+    for i in range(1,length):
+        result.append(np.mean(corr[i]))
+    return result
+
+
+#for p in range(len(polymers_pos)): 
+#    y= static_tangent_cor(polymers_pos[p],7500)
+#    plt.plot(np.arange(1,20),y,label='polymer'+str(p))
+
+#plt.title('correlation of momomers at t='+str(7500))
+#plt.legend()
+#plt.savefig('testfileoutput')
+
+def dynamic_tangent_cor(positions,timesteps,timebegin = 0):
+    corr = [[] for i in range(0,timesteps)]
+    for i in range(0,len(positions)):
+        tangent_vec_i = positions[i][timebegin] - positions[i-1][timebegin]
+        if np.sum(tangent_vec_i) != 0:
+            tangent_vec_i = tangent_vec_i/np.sum(abs(tangent_vec_i))
+            for j in range(1,timesteps):
+                tangent_vec_j = positions[i][timebegin+j] - positions[i-1][timebegin+j]  
+                if np.sum(tangent_vec_j) != 0:
+                    tangent_vec_j = tangent_vec_j/np.sum(abs(tangent_vec_j))
+                corr[j].append(np.dot(tangent_vec_i,tangent_vec_j))
+    print('here')
+    result = []
+    for i in range(1,timesteps):
+        result.append(np.mean(corr[i]))
+    return result
+
+
+timebegin = 7500
+for p in range(len(polymers_pos)): 
+    y= dynamic_tangent_cor(polymers_pos[p],50,timebegin)
+    plt.plot(np.arange(1,50),y,label='polymer'+str(p))
+
+plt.title('correlation over time from t='+str(timebegin))
+plt.legend()
+plt.savefig('testfileoutput')
